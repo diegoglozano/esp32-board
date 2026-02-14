@@ -1,14 +1,14 @@
-use actix_web::{get, web, App, HttpServer, HttpResponse};
-use reqwest;
-use serde::{Serialize, Deserialize};
+use actix_web::{App, HttpResponse, HttpServer, Responder, get, middleware::Logger, web};
 use futures::future::join_all;
+use reqwest;
+use serde::{Deserialize, Serialize};
 
 const HN_TOP_STORIES_URL: &str = "https://hacker-news.firebaseio.com/v0/topstories.json";
 const HN_ITEM_URL: &str = "https://hacker-news.firebaseio.com/v0/item";
 
 #[derive(Deserialize)]
 struct TopStoriesQuery {
-    top_n: Option<usize>
+    top_n: Option<usize>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -19,6 +19,11 @@ struct Story {
     // score: Option<i32>,
     // by: Option<String>,
     // time: Option<u64>,
+}
+
+#[get("/")]
+async fn hello() -> impl Responder {
+    HttpResponse::Ok().body("Hello world!")
 }
 
 #[get("/top-stories")]
@@ -36,20 +41,17 @@ async fn top_stories(query: web::Query<TopStoriesQuery>) -> Result<HttpResponse,
     let top_n = query.top_n.unwrap_or(5);
     // let stories: Vec<u64> = response.into_iter().take(top_n).collect();
 
-    let story_futures = response
-        .into_iter()
-        .take(top_n)
-        .map(|id| {
-            let client = &client;
-            async move {
-                client
-                    .get(format!("{}/{}.json", HN_ITEM_URL, id))
-                    .send()
-                    .await?
-                    .json::<Story>()
-                    .await
-            }
-        });
+    let story_futures = response.into_iter().take(top_n).map(|id| {
+        let client = &client;
+        async move {
+            client
+                .get(format!("{}/{}.json", HN_ITEM_URL, id))
+                .send()
+                .await?
+                .json::<Story>()
+                .await
+        }
+    });
     let stories: Vec<Story> = join_all(story_futures)
         .await
         .into_iter()
@@ -63,6 +65,8 @@ async fn top_stories(query: web::Query<TopStoriesQuery>) -> Result<HttpResponse,
 async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         App::new()
+            .wrap(Logger::default())
+            .service(hello)
             .service(top_stories)
     })
     .bind(("127.0.0.1", 8080))?
